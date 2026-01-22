@@ -1,0 +1,334 @@
+openapi: 3.0.4
+info:
+  title: CodeExecutorService API
+  version: 1.0.0
+  description: >
+    Сервис безопасно исполняет пользовательский код в sandbox с лимитами и возвращает
+    фактические результаты выполнения (stdout/stderr/ошибки/лимиты). НИКАКОГО сравнения
+    с expected, PASSED/FAILED и т.п. — это делает LearningService.
+
+servers:
+  - url: https://api.executor.local
+    description: Local Dev Server
+
+tags:
+  - name: Executions
+    description: Запуски кода
+  - name: Capabilities
+    description: Поддерживаемые языки и дефолтные лимиты
+  - name: Health
+    description: Health/Readiness
+
+paths:
+  /executions:
+    post:
+      summary: Создать запуск кода
+      tags: [Executions]
+      security:
+        - ServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionCreateRequest'
+      responses:
+        '201':
+          description: Запуск создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '400':
+          description: Ошибка валидации запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Нет авторизации
+        '403':
+          description: Доступ запрещён
+        '429':
+          description: Слишком много запусков
+        '500':
+          description: Ошибка сервиса
+
+  /executions/{id}:
+    get:
+      summary: Получить результат запуска
+      tags: [Executions]
+      security:
+        - ServiceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+      responses:
+        '200':
+          description: Статус/результат запуска
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          description: Запуск не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /executions/{id}/cancel:
+    post:
+      summary: Отменить запуск
+      tags: [Executions]
+      security:
+        - ServiceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+      responses:
+        '202':
+          description: Отмена принята
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionCancelResponse'
+        '404':
+          description: Запуск не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Нельзя отменить (уже завершён)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /capabilities:
+    get:
+      summary: Языки и дефолтные лимиты
+      tags: [Capabilities]
+      security:
+        - ServiceAuth: []
+      responses:
+        '200':
+          description: Capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
+
+  /health:
+    get:
+      summary: Liveness probe
+      tags: [Health]
+      responses:
+        '200':
+          description: OK
+
+  /ready:
+    get:
+      summary: Readiness probe
+      tags: [Health]
+      responses:
+        '200':
+          description: READY
+        '503':
+          description: NOT READY
+
+components:
+  securitySchemes:
+    ServiceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ExecutionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID запуска
+
+  schemas:
+    ExecutionCreateRequest:
+      type: object
+      required: [language, code, tests]
+      properties:
+        language:
+          type: string
+          enum: [python]
+          description: Язык исполнения
+        code:
+          type: string
+          description: Код пользователя
+        tests:
+          type: array
+          description: >
+            Список запусков одного и того же кода на разных stdin.
+            Для одиночного запуска передай один тест с id="run".
+          items:
+            $ref: '#/components/schemas/TestInput'
+        limits:
+          $ref: '#/components/schemas/ExecutionLimits'
+        executionPolicy:
+          $ref: '#/components/schemas/ExecutionPolicy'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Любые метаданные для трассировки (taskId, attemptId и т.п.)
+      example:
+        language: python
+        code: "print(input())"
+        tests:
+          - id: "run"
+            input: "hello\n"
+        limits:
+          timeLimitMs: 1500
+          memoryLimitMb: 256
+          outputLimitKb: 256
+        executionPolicy:
+          networkDisabled: true
+          readOnlyFs: true
+        metadata:
+          taskId: "8f2b3b0b-2f9b-4aa4-9a8c-7d4b6d8b2c77"
+
+    TestInput:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: ID теста (для сопоставления с результатом)
+        input:
+          type: string
+          nullable: true
+          description: stdin для данного теста
+        timeoutMs:
+          type: integer
+          nullable: true
+          description: Таймаут на конкретный тест (если нужен)
+
+    ExecutionLimits:
+      type: object
+      properties:
+        timeLimitMs:
+          type: integer
+          default: 1500
+        memoryLimitMb:
+          type: integer
+          default: 256
+        outputLimitKb:
+          type: integer
+          default: 256
+
+    ExecutionPolicy:
+      type: object
+      properties:
+        networkDisabled:
+          type: boolean
+          default: true
+        readOnlyFs:
+          type: boolean
+          default: true
+
+    Execution:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, FINISHED, CANCELLED]
+        language:
+          type: string
+
+        # Перенесли duration/peak/tests на верхний уровень, без блока result
+        durationMs:
+          type: integer
+          nullable: true
+          description: Суммарное время выполнения (по всем тестам)
+        peakMemoryMb:
+          type: integer
+          nullable: true
+          description: Пиковая память по всем тестам (максимум)
+        tests:
+          type: array
+          nullable: true
+          description: Результаты по каждому тесту/запуску
+          items:
+            $ref: '#/components/schemas/TestExecutionResult'
+
+        metadata:
+          type: object
+          additionalProperties: true
+
+    TestExecutionResult:
+      type: object
+      required: [testId, outcome]
+      properties:
+        testId:
+          type: string
+          description: Соответствует TestInput.id
+        outcome:
+          type: string
+          enum: [OK, RUNTIME_ERROR, TIMEOUT, MEMORY_LIMIT, INTERNAL_ERROR]
+          description: Технический исход выполнения (не "правильно/неправильно")
+        exitCode:
+          type: integer
+          nullable: true
+        stdout:
+          $ref: '#/components/schemas/OutputBlob'
+        stderr:
+          $ref: '#/components/schemas/OutputBlob'
+        durationMs:
+          type: integer
+          nullable: true
+          description: Время выполнения данного теста
+        memoryMb:
+          type: integer
+          nullable: true
+          description: Пиковая память на данном тесте (MB)
+
+    OutputBlob:
+      type: object
+      properties:
+        data:
+          type: string
+        truncated:
+          type: boolean
+
+    ExecutionCancelResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CANCELLED, FINISHED, RUNNING, QUEUED]
+        message:
+          type: string
+
+    CapabilitiesResponse:
+      type: object
+      properties:
+        languages:
+          type: array
+          items:
+            type: string
+            example: python
+        defaultLimits:
+          $ref: '#/components/schemas/ExecutionLimits'
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: integer
