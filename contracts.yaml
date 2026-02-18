@@ -1,7 +1,7 @@
 openapi: 3.0.4
 info:
   title: CodeExecutorService API
-  version: 1.0.0
+  version: 1.1.0
   description: >
     Сервис безопасно исполняет пользовательский код в sandbox с лимитами и возвращает
     фактические результаты выполнения (stdout/stderr/ошибки/лимиты). НИКАКОГО сравнения
@@ -22,7 +22,7 @@ tags:
 paths:
   /executions:
     post:
-      summary: Создать запуск кода
+      summary: Создать сессию исполнения (STEP)
       tags: [Executions]
       security:
         - ServiceAuth: []
@@ -31,10 +31,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ExecutionCreateRequest'
+              $ref: '#/components/schemas/ExecutionSessionCreateRequest'
       responses:
         '201':
-          description: Запуск создан
+          description: Сессия создана
           content:
             application/json:
               schema:
@@ -56,7 +56,7 @@ paths:
 
   /executions/{id}:
     get:
-      summary: Получить результат запуска
+      summary: Получить состояние/результаты сессии (STEP)
       tags: [Executions]
       security:
         - ServiceAuth: []
@@ -64,7 +64,7 @@ paths:
         - $ref: '#/components/parameters/ExecutionId'
       responses:
         '200':
-          description: Статус/результат запуска
+          description: Статус/результат сессии
           content:
             application/json:
               schema:
@@ -76,9 +76,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /executions/{id}/tests:
+    post:
+      summary: Запустить один тест в рамках сессии (STEP)
+      tags: [Executions]
+      security:
+        - ServiceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestInput'
+      responses:
+        '200':
+          description: Результат выполнения теста
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestExecutionResult'
+        '400':
+          description: Ошибка валидации запроса / сессия не в RUNNING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Сессия/запуск не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Нет авторизации
+        '403':
+          description: Доступ запрещён
+        '429':
+          description: Слишком много запусков
+        '500':
+          description: Ошибка сервиса
+
   /executions/{id}/cancel:
     post:
-      summary: Отменить запуск
+      summary: Отменить сессию/запуск (STEP)
       tags: [Executions]
       security:
         - ServiceAuth: []
@@ -103,6 +145,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /executions/batch:
+    post:
+      summary: Создать пакетный запуск (BATCH) - 1 контейнер на все тесты
+      tags: [Executions]
+      security:
+        - ServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionCreateRequest'
+      responses:
+        '201':
+          description: Пакетный запуск выполнен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '400':
+          description: Ошибка валидации запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Нет авторизации
+        '403':
+          description: Доступ запрещён
+        '429':
+          description: Слишком много запусков
+        '500':
+          description: Ошибка сервиса
 
   /capabilities:
     get:
@@ -151,12 +227,44 @@ components:
       schema:
         type: string
         format: uuid
-      description: ID запуска
+      description: ID запуска/сессии
 
   schemas:
+    ExecutionSessionCreateRequest:
+      type: object
+      required: [language, code, metadata]
+      properties:
+        language:
+          type: string
+          enum: [python]
+          description: Язык исполнения
+        code:
+          type: string
+          description: Код пользователя
+        limits:
+          $ref: '#/components/schemas/ExecutionLimits'
+        executionPolicy:
+          $ref: '#/components/schemas/ExecutionPolicy'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Любые метаданные для трассировки (taskId, attemptId и т.п.)
+      example:
+        language: python
+        code: "print(input())"
+        limits:
+          timeLimitMs: 1500
+          memoryLimitMb: 256
+          outputLimitKb: 256
+        executionPolicy:
+          networkDisabled: true
+          readOnlyFs: true
+        metadata:
+          taskId: "8f2b3b0b-2f9b-4aa4-9a8c-7d4b6d8b2c77"
+
     ExecutionCreateRequest:
       type: object
-      required: [language, code, tests]
+      required: [language, code, tests, metadata]
       properties:
         language:
           type: string
@@ -167,6 +275,7 @@ components:
           description: Код пользователя
         tests:
           type: array
+          minItems: 1
           description: >
             Список запусков одного и того же кода на разных stdin.
             Для одиночного запуска передай один тест с id="run".
@@ -246,12 +355,10 @@ components:
           enum: [QUEUED, RUNNING, FINISHED, CANCELLED]
         language:
           type: string
-
-        # Перенесли duration/peak/tests на верхний уровень, без блока result
         durationMs:
           type: integer
           nullable: true
-          description: Суммарное время выполнения (по всем тестам)
+          description: Суммарное время выполнения (по всем тестам) / по прогнанным тестам в STEP
         peakMemoryMb:
           type: integer
           nullable: true
@@ -259,10 +366,9 @@ components:
         tests:
           type: array
           nullable: true
-          description: Результаты по каждому тесту/запуску
+          description: Результаты по каждому тесту/запуску (в STEP — уже выполненные)
           items:
             $ref: '#/components/schemas/TestExecutionResult'
-
         metadata:
           type: object
           additionalProperties: true
