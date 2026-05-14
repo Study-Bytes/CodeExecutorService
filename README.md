@@ -34,7 +34,7 @@ MVP для микросервиса исполнения кода.
 ./mvnw spring-boot:run
 ```
 
-По умолчанию сервис стартует на `http://localhost:8080`.
+По умолчанию сервис стартует на `http://localhost:8095`.
 
 ---
 
@@ -43,7 +43,7 @@ MVP для микросервиса исполнения кода.
 ### Шаг 1: создать сессию
 
 - Method: `POST`
-- URL: `http://localhost:8080/executions`
+- URL: `http://localhost:8095/executions`
 - Header: `Content-Type: application/json`
 
 Body (raw JSON):
@@ -86,7 +86,7 @@ Body (raw JSON):
 ### Шаг 2: прогнать тест №1
 
 - Method: `POST`
-- URL: `http://localhost:8080/executions/<SESSION_UUID>/tests`
+- URL: `http://localhost:8095/executions/<SESSION_UUID>/tests`
 - Header: `Content-Type: application/json`
 
 ```json
@@ -110,7 +110,7 @@ Body (raw JSON):
 ### Шаг 3: прогнать тест №2 (и т.д.)
 
 ```http
-POST http://localhost:8080/executions/<SESSION_UUID>/tests
+POST http://localhost:8095/executions/<SESSION_UUID>/tests
 ```
 
 ```json
@@ -120,7 +120,7 @@ POST http://localhost:8080/executions/<SESSION_UUID>/tests
 ### Шаг 4: получить агрегированный результат сессии
 
 - Method: `GET`
-- URL: `http://localhost:8080/executions/<SESSION_UUID>`
+- URL: `http://localhost:8095/executions/<SESSION_UUID>`
 
 Ответ `200` содержит уже выполненные тесты + агрегаты:
 
@@ -130,14 +130,14 @@ POST http://localhost:8080/executions/<SESSION_UUID>/tests
 ### Шаг 5: завершить сессию
 
 - Method: `POST`
-- URL: `http://localhost:8080/executions/<SESSION_UUID>/cancel`
+- URL: `http://localhost:8095/executions/<SESSION_UUID>/cancel`
 
 ---
 
 ## Пример 2 — BATCH (пакетный прогон)
 
 - Method: `POST`
-- URL: `http://localhost:8080/executions/batch`
+- URL: `http://localhost:8095/executions/batch`
 - Header: `Content-Type: application/json`
 
 ```json
