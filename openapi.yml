@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: CodeExecutorService API
+  version: 1.0.0
+  description: API contract for CodeExecutorService
+servers:
+  - url: http://localhost:8095
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+  /ready:
+    get:
+      summary: Readiness probe
+      operationId: getReady
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: READY
+  /executions:
+    post:
+      summary: Create execution session
+      operationId: createExecutionSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+  /executions/batch:
+    post:
+      summary: Execute tests in batch mode
+      operationId: createBatchExecution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: Batch execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+  /executions/{id}/tests:
+    post:
+      summary: Run single test in session
+      operationId: runExecutionTest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Test executed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /executions/{id}/cancel:
+    post:
+      summary: Cancel execution session
+      operationId: cancelExecutionSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Session cancellation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /executions/{id}:
+    get:
+      summary: Get execution session state
+      operationId: getExecutionSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+components:
+  schemas:
+    ExecutionResponse:
+      type: object
+      additionalProperties: true
