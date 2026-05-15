@@ -139,8 +139,14 @@ jobs:
                  touch .env
                fi
              fi
-             docker compose up -d --build
-             docker compose ps
+             if [ -f docker-compose.yml ] || [ -f docker-compose.yaml ] || [ -f compose.yml ] || [ -f compose.yaml ]; then
+               docker compose up -d --build
+               docker compose ps
+             else
+               docker build -t code-executor-service:latest .
+               docker rm -f code-executor-service || true
+               docker run -d --name code-executor-service --restart unless-stopped -p 8095:8095 -e SERVER_PORT=8095 code-executor-service:latest
+             fi
              for attempt in \$(seq 1 40); do
                if curl -fsS '$HEALTHCHECK_URL'; then
                  exit 0
@@ -148,5 +154,9 @@ jobs:
                echo \"Waiting for CodeExecutorService health check... attempt \$attempt/40\"
                sleep 3
              done
-             docker compose logs --tail=200 code-executor-service
+             if [ -f docker-compose.yml ] || [ -f docker-compose.yaml ] || [ -f compose.yml ] || [ -f compose.yaml ]; then
+               docker compose logs --tail=200 code-executor-service
+             else
+               docker logs --tail=200 code-executor-service
+             fi
              exit 1"
