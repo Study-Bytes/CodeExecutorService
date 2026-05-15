@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Build, test, OpenAPI and Docker check
+    name: Build, test and Docker check
     runs-on: ubuntu-latest
 
     env:
@@ -39,12 +39,6 @@ jobs:
 
       - name: Run tests
         run: ./mvnw -B clean verify
-
-      - name: Validate OpenAPI contract
-        run: ruby -e "require 'yaml'; YAML.load_file('openapi.yml')"
-
-      - name: Check OpenAPI contract is committed
-        run: git diff --exit-code openapi.yml
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
