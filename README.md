@@ -31,6 +31,35 @@ MVP для микросервиса исполнения кода.
 
 ## Запуск
 
+### Вариант A: Docker Compose (рекомендуется)
+
+Перед запуском убедись, что создана общая сеть для межсервисного взаимодействия:
+
+```bash
+docker network create studybytes_backend_net
+```
+
+Запуск:
+
+```bash
+docker compose up --build -d
+```
+
+Проверка:
+
+```bash
+docker compose ps
+docker compose logs code-executor-service --tail 100
+```
+
+Остановка:
+
+```bash
+docker compose down
+```
+
+### Вариант B: Maven
+
 ```bash
 ./mvnw spring-boot:run
 ```
