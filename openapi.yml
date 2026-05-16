@@ -1,10 +1,10 @@
-openapi: 3.0.3
+﻿openapi: 3.0.3
 info:
   title: CodeExecutorService API
   version: 1.0.0
   description: API contract for CodeExecutorService
 servers:
-  - url: http://localhost:8095
+  - url: http://localhost:8084
 paths:
   /health:
     get:
