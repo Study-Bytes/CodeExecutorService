@@ -1,0 +1,25 @@
+name: studybytes-code-executor-local
+
+services:
+  code-executor-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: studybytes/code-executor-service:local
+    container_name: code-executor-service
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8084}
+    ports:
+      # Temporary localhost-only host access for VPS Nginx until BFF/reverse proxy is ready.
+      - "127.0.0.1:${CODE_EXECUTOR_SERVICE_PORT:-8084}:8084"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+    networks:
+      - code_executor_backend_net
+
+networks:
+  code_executor_backend_net:
+    name: ${CODE_EXECUTOR_BACKEND_NETWORK:-studybytes_backend_net}
+    external: true
