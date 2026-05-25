@@ -18,13 +18,17 @@ docker compose logs code-executor-service --tail 100
 
 Если сеть уже существует, `docker network create` может вывести ошибку; просто продолжайте с compose.
 
-Параметры пула тёплых Python-контейнеров по умолчанию:
+Параметры тёплых пулов по умолчанию:
 
 ```env
 EXECUTOR_PYTHON_WARM_POOL_ENABLED=true
 EXECUTOR_PYTHON_WARM_POOL_SIZE=3
 EXECUTOR_PYTHON_WARM_POOL_MEMORY_LIMIT_MB=256
 EXECUTOR_PYTHON_WARM_POOL_ACQUIRE_TIMEOUT_MS=30000
+EXECUTOR_SQL_WARM_POOL_ENABLED=true
+EXECUTOR_SQL_WARM_POOL_SIZE=3
+EXECUTOR_SQL_WARM_POOL_MEMORY_LIMIT_MB=256
+EXECUTOR_SQL_WARM_POOL_ACQUIRE_TIMEOUT_MS=30000
 ```
 
 Проверки health:
@@ -35,6 +39,8 @@ GET http://localhost:8084/ready
 ```
 
 ## SQL BATCH
+
+SQL uses the warm-container pool by default. Each request takes one free PostgreSQL container, each test runs in its own temporary database, and the container is returned to the pool after cleanup.
 
 Метод: `POST`
 
@@ -299,7 +305,10 @@ Content-Type: application/json
 
 Примечания:
 
-- `/executions/batch` всё ещё работает для обычного Python и теперь также для SQL.
-- `/executions/opt-batch` работает только для Python и использует один свободный тёплый контейнер из пула.
-- Если все 3 тёплых контейнера заняты, запрос ждёт до `EXECUTOR_PYTHON_WARM_POOL_ACQUIRE_TIMEOUT_MS`.
-- При исходе timeout или memory-limit использованный тёплый контейнер пересоздаётся перед возвратом в пул.
+- `/executions/batch` works for Python and SQL.
+- For Python, `/executions/batch` uses one free warm Python container from the pool by default.
+- For SQL, `/executions/batch` uses one free warm PostgreSQL container from the pool by default.
+- `/executions/opt-batch` is still available as an explicit Python-only warm endpoint.
+- If all warm Python containers are busy, the request waits up to `EXECUTOR_PYTHON_WARM_POOL_ACQUIRE_TIMEOUT_MS`.
+- If all warm SQL containers are busy, the request waits up to `EXECUTOR_SQL_WARM_POOL_ACQUIRE_TIMEOUT_MS`.
+- On timeout or memory-limit outcome, the used warm container is recreated before it returns to the pool.

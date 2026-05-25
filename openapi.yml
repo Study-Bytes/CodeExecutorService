@@ -51,7 +51,7 @@ paths:
   /executions/batch:
     post:
       summary: Execute tests in batch mode
-      description: Supports language=python, language=sql and language=postgresql. Python uses the warm-container OPT_BATCH path by default.
+      description: Supports language=python, language=sql and language=postgresql. Python and SQL use warm-container pools by default.
       operationId: createBatchExecution
       requestBody:
         required: true
@@ -152,7 +152,7 @@ components:
       properties:
         language:
           type: string
-          description: python, sql or postgresql. /executions/batch uses warm containers for python by default; /executions/opt-batch accepts only python.
+          description: python, sql or postgresql. /executions/batch uses warm containers for python and SQL by default; /executions/opt-batch accepts only python.
           example: python
         code:
           type: string
