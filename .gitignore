@@ -25,3 +25,18 @@ replay_pid*
 
 # Local environment secrets
 .env
+
+# Build output
+/target/
+/out/
+
+# IDE
+/.idea/
+*.iml
+/.vscode/
+
+# OS / temp
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

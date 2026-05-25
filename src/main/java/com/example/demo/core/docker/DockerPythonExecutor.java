@@ -3,6 +3,7 @@ package com.example.demo.core.docker;
 import com.example.demo.api.dto.*;
 import com.example.demo.core.validation.InternalErrorException;
 import com.example.demo.core.docker.SessionResources;
+import com.example.demo.core.executor.LanguageExecutor;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
@@ -16,13 +17,18 @@ import java.util.UUID;
 import java.util.concurrent.*;
 
 @Component
-public class DockerPythonExecutor {
+public class DockerPythonExecutor implements LanguageExecutor {
 
     // Для MVP фиксируем образ. Можно вынести в application.properties.
     private static final String PYTHON_IMAGE = "python:3.12-alpine";
 
     // Виртуальные потоки удобны (Java 21+). Если будут проблемы, можно заменить на cachedThreadPool.
     private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    @Override
+    public boolean supports(String language) {
+        return "python".equals(language);
+    }
 
     /**
      * Create a new long‑lived container session.  The session mounts a
@@ -292,15 +298,12 @@ public class DockerPythonExecutor {
         }
         return results;
     }
+    @Override
     public List<TestExecutionResult> executeBatch(String code,
                                                  List<TestInput> tests,
                                                  ExecutionLimits limits,
                                                  ExecutionPolicy policy) {
-        List<TestExecutionResult> out = new ArrayList<>(tests.size());
-        for (TestInput test : tests) {
-            out.add(executeSingle(code, test, limits, policy));
-        }
-        return out;
+        return executeBatchSingleContainer(code, tests, limits, policy);
     }
 
     private TestExecutionResult executeSingle(String code,
