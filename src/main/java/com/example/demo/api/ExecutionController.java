@@ -51,6 +51,12 @@ public class ExecutionController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @PostMapping("/executions/opt-batch")
+    public ResponseEntity<ExecutionResponse> createOptimizedBatchExecution(@Valid @RequestBody ExecutionCreateRequest request) {
+        ExecutionResponse response = executionService.executeOptimizedBatch(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     /**
      * Запуск одного теста внутри уже созданной сессии (режим STEP).
      * В запросе передаётся id теста, stdin и при необходимости timeout.

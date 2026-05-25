@@ -1,112 +1,103 @@
 package com.example.demo.core;
 
-import com.example.demo.api.dto.*;
+import com.example.demo.api.dto.ExecutionCancelResponse;
+import com.example.demo.api.dto.ExecutionCreateRequest;
+import com.example.demo.api.dto.ExecutionLimits;
+import com.example.demo.api.dto.ExecutionMetadata;
+import com.example.demo.api.dto.ExecutionPolicy;
+import com.example.demo.api.dto.ExecutionResponse;
 import com.example.demo.api.dto.ExecutionSessionCreateRequest;
+import com.example.demo.api.dto.ExecutionStatus;
+import com.example.demo.api.dto.TestExecutionResult;
+import com.example.demo.api.dto.TestInput;
 import com.example.demo.core.docker.DockerPythonExecutor;
+import com.example.demo.core.docker.DockerPythonWarmPool;
+import com.example.demo.core.docker.SessionResources;
+import com.example.demo.core.executor.LanguageExecutor;
+import com.example.demo.core.executor.LanguageExecutorRegistry;
 import com.example.demo.core.validation.BadRequestException;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ExecutionService {
 
+    private final LanguageExecutorRegistry executorRegistry;
     private final DockerPythonExecutor dockerPythonExecutor;
-
-    /**
-     * Реестр долгоживущих сессий исполнения, индексируемых по UUID.
-     * Сессия инкапсулирует запущенный контейнер, внутри которого можно
-     * выполнять несколько тестов. Если по запрошенному id сессия не найдена,
-     * сервис вернёт ошибку.
-     */
+    private final DockerPythonWarmPool dockerPythonWarmPool;
     private final Map<UUID, ExecutionSession> sessions = new ConcurrentHashMap<>();
 
-    public ExecutionService(DockerPythonExecutor dockerPythonExecutor) {
+    public ExecutionService(
+            LanguageExecutorRegistry executorRegistry,
+            DockerPythonExecutor dockerPythonExecutor,
+            DockerPythonWarmPool dockerPythonWarmPool
+    ) {
+        this.executorRegistry = executorRegistry;
         this.dockerPythonExecutor = dockerPythonExecutor;
+        this.dockerPythonWarmPool = dockerPythonWarmPool;
     }
 
-    /**
-     * Пакетное выполнение тестов в одном контейнере (режим BATCH).
-     * Входной запрос содержит код и список тестов.
-     * Тесты выполняются последовательно внутри одного контейнера.
-     * Если возникает техническая ошибка (timeout, превышение памяти,
-     * runtime-ошибка или внутренняя ошибка), последующие тесты не
-     * выполняются, а для них возвращаются placeholder-результаты.
-     *
-     * Возвращаемый {@link ExecutionResponse} содержит агрегированную
-     * длительность выполнения и пиковое потребление памяти по выполненным тестам.
-     *
-     * @param request запрос пакетного выполнения (код + тесты)
-     * @return агрегированный результат выполнения
-     */
     public ExecutionResponse executeBatch(ExecutionCreateRequest request) {
-        String language = request.getLanguage().trim().toLowerCase();
-        if (!"python".equals(language)) {
-            throw new BadRequestException("Only language=python is supported for now");
-        }
-
+        String language = executorRegistry.normalize(request.getLanguage());
         ExecutionLimits limits = request.getLimits() != null ? request.getLimits() : new ExecutionLimits();
         ExecutionPolicy policy = request.getExecutionPolicy() != null ? request.getExecutionPolicy() : new ExecutionPolicy();
 
-        List<TestExecutionResult> results = dockerPythonExecutor.executeBatchSingleContainer(
+        if ("python".equals(language)) {
+            List<TestExecutionResult> results = dockerPythonWarmPool.executeOptimizedBatch(
+                    request.getCode(),
+                    request.getTests(),
+                    limits,
+                    policy
+            );
+            return finishedResponse(language, request.getMetadata(), results);
+        }
+
+        LanguageExecutor executor = executorRegistry.resolve(language);
+        List<TestExecutionResult> results = executor.executeBatch(
                 request.getCode(),
                 request.getTests(),
                 limits,
                 policy
         );
 
-        ExecutionResponse response = new ExecutionResponse();
-        // Для batch-режима создаём новый id — постоянной сессии не существует
-        response.setId(UUID.randomUUID());
-        response.setStatus(ExecutionStatus.FINISHED);
-        response.setLanguage(language);
-        response.setMetadata(request.getMetadata());
-        response.setTests(results);
-
-        long totalDuration = results.stream()
-                .map(TestExecutionResult::getDurationMs)
-                .filter(d -> d != null)
-                .mapToLong(Long::longValue)
-                .sum();
-        response.setDurationMs(totalDuration);
-
-        Integer peak = results.stream()
-                .map(TestExecutionResult::getMemoryMb)
-                .filter(m -> m != null)
-                .max(Comparator.naturalOrder())
-                .orElse(null);
-        response.setPeakMemoryMb(peak);
-
-        return response;
+        return finishedResponse(language, request.getMetadata(), results);
     }
 
-    /**
-     * Создание новой долгоживущей сессии исполнения (режим STEP).
-     * Сессия поднимает контейнер с пользовательским кодом и возвращает
-     * {@link ExecutionResponse} с идентификатором сессии.
-     * Тесты можно выполнять позже через {@link #runTest(UUID, TestInput)}.
-     *
-     * @param request запрос с языком, кодом, лимитами, политикой и метаданными
-     * @return ответ с id сессии и статусом
-     */
-    public ExecutionResponse createSession(ExecutionSessionCreateRequest request) {
-        String language = request.getLanguage().trim().toLowerCase();
+    public ExecutionResponse executeOptimizedBatch(ExecutionCreateRequest request) {
+        String language = executorRegistry.normalize(request.getLanguage());
         if (!"python".equals(language)) {
-            throw new BadRequestException("Only language=python is supported for now");
+            throw new BadRequestException("OPT_BATCH supports only language=python");
+        }
+
+        ExecutionLimits limits = request.getLimits() != null ? request.getLimits() : new ExecutionLimits();
+        ExecutionPolicy policy = request.getExecutionPolicy() != null ? request.getExecutionPolicy() : new ExecutionPolicy();
+
+        List<TestExecutionResult> results = dockerPythonWarmPool.executeOptimizedBatch(
+                request.getCode(),
+                request.getTests(),
+                limits,
+                policy
+        );
+
+        return finishedResponse(language, request.getMetadata(), results);
+    }
+
+    public ExecutionResponse createSession(ExecutionSessionCreateRequest request) {
+        String language = executorRegistry.normalize(request.getLanguage());
+        if (!"python".equals(language)) {
+            throw new BadRequestException("STEP mode supports only language=python");
         }
 
         ExecutionLimits limits = request.getLimits() != null ? request.getLimits() : new ExecutionLimits();
         ExecutionPolicy policy = request.getExecutionPolicy() != null ? request.getExecutionPolicy() : new ExecutionPolicy();
         UUID id = UUID.randomUUID();
 
-        // Создание docker-сессии (контейнера)
-        var sessionResources = dockerPythonExecutor.createSession(request.getCode(), limits, policy);
-
-        // Формирование объекта сессии исполнения
+        SessionResources sessionResources = dockerPythonExecutor.createSession(request.getCode(), limits, policy);
         ExecutionSession session = new ExecutionSession(
                 id,
                 language,
@@ -124,25 +115,12 @@ public class ExecutionService {
         response.setStatus(ExecutionStatus.RUNNING);
         response.setLanguage(language);
         response.setMetadata(request.getMetadata());
-
-        // Пока тесты не запускались — агрегированные поля null
         response.setTests(null);
         response.setDurationMs(null);
         response.setPeakMemoryMb(null);
-
         return response;
     }
 
-    /**
-     * Выполнение одного теста внутри существующей сессии.
-     * Сессия должна существовать и быть в статусе RUNNING.
-     * Тест выполняется через docker exec, результат возвращается клиенту.
-     * Агрегированные метрики сессии обновляются.
-     *
-     * @param sessionId UUID сессии, полученный из {@link #createSession}
-     * @param test      входные данные теста (id, stdin, timeout)
-     * @return результат выполнения теста
-     */
     public TestExecutionResult runTest(UUID sessionId, TestInput test) {
         ExecutionSession session = sessions.get(sessionId);
         if (session == null) {
@@ -153,64 +131,36 @@ public class ExecutionService {
         }
 
         TestExecutionResult result = dockerPythonExecutor.executeInSession(
-                new com.example.demo.core.docker.SessionResources(session.getContainerId(), session.getWorkDir()),
+                new SessionResources(session.getContainerId(), session.getWorkDir()),
                 test,
                 session.getLimits()
         );
 
-        // Добавляем результат в список выполненных тестов
         session.getResults().add(result);
-
-        // Обновляем суммарную длительность
         if (result.getDurationMs() != null) {
             session.addDuration(result.getDurationMs());
         }
-
-        // Обновляем пиковое потребление памяти
         session.updatePeakMemory(result.getMemoryMb());
 
         return result;
     }
 
-    /**
-     * Отмена запущенной сессии: остановка и удаление контейнера,
-     * освобождение ресурсов. После отмены сессия больше не может
-     * использоваться повторно.
-     *
-     * @param sessionId идентификатор сессии
-     * @return ответ об отмене
-     */
     public ExecutionCancelResponse cancelSession(UUID sessionId) {
         ExecutionSession session = sessions.remove(sessionId);
         if (session == null) {
             throw new BadRequestException("Session not found: " + sessionId);
         }
 
-        dockerPythonExecutor.closeSession(
-                new com.example.demo.core.docker.SessionResources(
-                        session.getContainerId(),
-                        session.getWorkDir()
-                )
-        );
-
+        dockerPythonExecutor.closeSession(new SessionResources(session.getContainerId(), session.getWorkDir()));
         session.setStatus(ExecutionStatus.CANCELLED);
 
         ExecutionCancelResponse resp = new ExecutionCancelResponse();
         resp.setId(sessionId.toString());
         resp.setStatus(session.getStatus().name());
         resp.setMessage("Session cancelled");
-
         return resp;
     }
 
-    /**
-     * Получение текущего состояния сессии (RUNNING или FINISHED).
-     * Возвращает агрегированную длительность, пиковую память
-     * и список уже выполненных тестов.
-     *
-     * @param sessionId идентификатор сессии
-     * @return агрегированный результат исполнения
-     */
     public ExecutionResponse getSession(UUID sessionId) {
         ExecutionSession session = sessions.get(sessionId);
         if (session == null) {
@@ -225,7 +175,35 @@ public class ExecutionService {
         resp.setTests(session.getResults());
         resp.setDurationMs(session.getTotalDurationMs());
         resp.setPeakMemoryMb(session.getPeakMemoryMb());
-
         return resp;
+    }
+
+    private ExecutionResponse finishedResponse(
+            String language,
+            ExecutionMetadata metadata,
+            List<TestExecutionResult> results
+    ) {
+        ExecutionResponse response = new ExecutionResponse();
+        response.setId(UUID.randomUUID());
+        response.setStatus(ExecutionStatus.FINISHED);
+        response.setLanguage(language);
+        response.setMetadata(metadata);
+        response.setTests(results);
+
+        long totalDuration = results.stream()
+                .map(TestExecutionResult::getDurationMs)
+                .filter(duration -> duration != null)
+                .mapToLong(Long::longValue)
+                .sum();
+        response.setDurationMs(totalDuration);
+
+        Integer peak = results.stream()
+                .map(TestExecutionResult::getMemoryMb)
+                .filter(memory -> memory != null)
+                .max(Comparator.naturalOrder())
+                .orElse(null);
+        response.setPeakMemoryMb(peak);
+
+        return response;
     }
 }

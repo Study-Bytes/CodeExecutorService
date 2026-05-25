@@ -33,14 +33,14 @@ paths:
   /executions:
     post:
       summary: Create execution session
+      description: STEP mode. Currently supports only language=python.
       operationId: createExecutionSession
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/ExecutionSessionCreateRequest'
       responses:
         '201':
           description: Session created
@@ -51,17 +51,35 @@ paths:
   /executions/batch:
     post:
       summary: Execute tests in batch mode
+      description: Supports language=python, language=sql and language=postgresql. Python uses the warm-container OPT_BATCH path by default.
       operationId: createBatchExecution
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/ExecutionCreateRequest'
       responses:
         '201':
           description: Batch execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+  /executions/opt-batch:
+    post:
+      summary: Execute Python tests in optimized warm-container batch mode
+      description: Supports only language=python. Kept as an explicit OPT_BATCH endpoint; /executions/batch now uses the same warm-container path for Python by default.
+      operationId: createOptimizedBatchExecution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionCreateRequest'
+      responses:
+        '201':
+          description: Optimized batch execution created
           content:
             application/json:
               schema:
@@ -82,16 +100,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: '#/components/schemas/TestInput'
       responses:
         '200':
           description: Test executed
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/TestExecutionResult'
   /executions/{id}/cancel:
     post:
       summary: Cancel execution session
@@ -109,8 +125,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ExecutionCancelResponse'
   /executions/{id}:
     get:
       summary: Get execution session state
@@ -131,6 +146,144 @@ paths:
                 $ref: '#/components/schemas/ExecutionResponse'
 components:
   schemas:
+    ExecutionCreateRequest:
+      type: object
+      required: [language, code, tests, metadata]
+      properties:
+        language:
+          type: string
+          description: python, sql or postgresql. /executions/batch uses warm containers for python by default; /executions/opt-batch accepts only python.
+          example: python
+        code:
+          type: string
+          description: User source code. For SQL this is the submitted SQL statement/script.
+        tests:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TestInput'
+        limits:
+          $ref: '#/components/schemas/ExecutionLimits'
+        executionPolicy:
+          $ref: '#/components/schemas/ExecutionPolicy'
+        metadata:
+          $ref: '#/components/schemas/ExecutionMetadata'
+    ExecutionSessionCreateRequest:
+      type: object
+      required: [language, code, metadata]
+      properties:
+        language:
+          type: string
+          enum: [python]
+        code:
+          type: string
+        limits:
+          $ref: '#/components/schemas/ExecutionLimits'
+        executionPolicy:
+          $ref: '#/components/schemas/ExecutionPolicy'
+        metadata:
+          $ref: '#/components/schemas/ExecutionMetadata'
+    TestInput:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          example: case1
+        input:
+          type: string
+          nullable: true
+          description: Python stdin. For SQL batch this is setup SQL for the test database.
+        timeoutMs:
+          type: integer
+          nullable: true
+          example: 1500
+    ExecutionLimits:
+      type: object
+      properties:
+        timeLimitMs:
+          type: integer
+          default: 60000
+        memoryLimitMb:
+          type: integer
+          default: 256
+        outputLimitKb:
+          type: integer
+          default: 256
+    ExecutionPolicy:
+      type: object
+      properties:
+        networkDisabled:
+          type: boolean
+          default: true
+        readOnlyFs:
+          type: boolean
+          default: true
+    ExecutionMetadata:
+      type: object
+      required: [taskId]
+      properties:
+        taskId:
+          type: string
+          example: demo-task
     ExecutionResponse:
       type: object
-      additionalProperties: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, FINISHED, CANCELLED]
+        language:
+          type: string
+        durationMs:
+          type: integer
+          nullable: true
+        peakMemoryMb:
+          type: integer
+          nullable: true
+        tests:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TestExecutionResult'
+        metadata:
+          $ref: '#/components/schemas/ExecutionMetadata'
+    TestExecutionResult:
+      type: object
+      properties:
+        testId:
+          type: string
+        outcome:
+          type: string
+          enum: [OK, RUNTIME_ERROR, TIMEOUT, MEMORY_LIMIT, INTERNAL_ERROR]
+        exitCode:
+          type: integer
+          nullable: true
+        stdout:
+          $ref: '#/components/schemas/OutputBlob'
+        stderr:
+          $ref: '#/components/schemas/OutputBlob'
+        durationMs:
+          type: integer
+          nullable: true
+        memoryMb:
+          type: integer
+          nullable: true
+    OutputBlob:
+      type: object
+      properties:
+        data:
+          type: string
+        truncated:
+          type: boolean
+    ExecutionCancelResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
