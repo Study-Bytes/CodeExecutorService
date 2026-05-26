@@ -27,13 +27,13 @@ replay_pid*
 .env
 
 # Build output
-/target/
-/out/
+target/
+out/
 
 # IDE
-/.idea/
+.idea/
 *.iml
-/.vscode/
+.vscode/
 
 # OS / temp
 .DS_Store
